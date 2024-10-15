@@ -1,13 +1,34 @@
 name = "ElectricityEmissions"
 uuid = "071d0d29-39bd-4f04-b4db-7866826f86bf"
 authors = ["Joe Gorka <jgorka@wisc.edu>, Noah Rhodes <nrhodes@lanl.gov>, Line Roald <roald@wisc.edu>"]
-version = "1.0.0-DEV"
+version = "0.1.0"
+
+[deps]
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+HiGHS = "87dc4568-4c63-4d18-b0c0-bb2238e4078b"
+JuMP = "4076af6c-e467-56ae-b986-b466b2749572"
+MathOptInterface = "b8f27783-ece8-5eb3-8dc8-9495eed66fee"
+PGLib = "07a8691f-3d11-4330-951b-3c50f98338be"
+PowerModels = "c36e90e8-916a-50a6-bd94-075b64ef4655"
+PowerPlots = "229d1e32-5c67-4c9a-a884-d6a3a7f23cfa"
+Setfield = "efcf1570-3423-57d1-acb7-fd33fddbac46"
+TestEnv = "1e6cf692-eddd-4d53-88a5-2d735e33781b"
+XLSX = "fdbf4ff8-1666-58a4-91e7-1b58723a45e0"
+
+[weakdeps]
+PowerPlots = "229d1e32-5c67-4c9a-a884-d6a3a7f23cfa"
+
+[extensions]
+ElectricityEmissionsExt = "PowerPlots"
 
 [compat]
-julia = "1.6.7"
+julia = "1.6"
 
 [extras]
+HiGHS = "87dc4568-4c63-4d18-b0c0-bb2238e4078b"
+PGLib = "07a8691f-3d11-4330-951b-3c50f98338be"
+PowerPlots = "229d1e32-5c67-4c9a-a884-d6a3a7f23cfa"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
-test = ["Test"]
+test = ["Test", "PGLib", "HiGHS", "PowerPlots"]
