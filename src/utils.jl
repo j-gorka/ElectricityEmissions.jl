@@ -29,8 +29,22 @@ function _no_duplicate_costs_at_bus(data)
     return no_duplicate
 end
 
+function _all_gen_costs_single_type(data)
+    same_type = true
+    first_type = collect(values(data["gen"]))[1]["model"]
+    for (id,gen) in data["gen"]
+        if !(gen["model"]==first_type)
+            print("Generators have multiple cost function types, not supported.")
+            same_type=false
+        end
+    end
 
-function _build_dcopf(ref::Dict{Symbol,<:Any}, optimizer,pwl=true)
+    return same_type
+
+end
+
+
+function _build_dcopf(ref::Dict{Symbol,<:Any}, optimizer;cost_type="PWL")
     model = JuMP.Model()
     JuMP.set_optimizer(model, optimizer)
 
@@ -45,7 +59,7 @@ function _build_dcopf(ref::Dict{Symbol,<:Any}, optimizer,pwl=true)
     #     sum(gen["cost"][2]*pg[i] for (i,gen) in ref[:gen])
     # )
 
-    if pwl
+    if cost_type=="PWL"
         #create dummy cost variable for each generator. Will be constrained such that cg is higher than all lines formed by extending PWL segments (assumes convexity)
         JuMP.@variable(model,cg[i in keys(ref[:gen])])
         #constrain cg variables
@@ -78,14 +92,16 @@ function _build_dcopf(ref::Dict{Symbol,<:Any}, optimizer,pwl=true)
         #and finally, set objective to be minimization of sum of cg variables
         JuMP.@objective(model, Min, sum(cg))
 
-    else
-        #approximation of PWL, drawing line from first point to last point, right now tuned for RTS-GMLC system
-        #..assumes there are at least two points that define the PWL cost
+
+    elseif cost_type=="POLY"
+        #no support for quadratic terms, use only linear and constant
+        #this assumes that these are the final two terms in a polynomial cost fn
         JuMP.@objective(model, Min,
-        sum(
-            ((gen["cost"][end] - gen["cost"][2])/(gen["cost"][end-1]-gen["cost"][1]))*pg[i] for (i,gen) in ref[:gen]
-            )
+        sum(gen["cost"][end-1]*pg[i] + gen["cost"][end] for (i,gen) in ref[:gen])
         )
+
+    else
+        error("Unsupported cost function type $(cost_type) provided")
     end
 
     # Add Constraints
@@ -131,8 +147,8 @@ function _build_dcopf(ref::Dict{Symbol,<:Any}, optimizer,pwl=true)
 end
 
 
-function _solve_dcopf(data, optimizer)
-    model = _build_dcopf(data, optimizer)
+function _solve_dcopf(data, optimizer;cost_type="PWL")
+    model = _build_dcopf(data, optimizer,cost_type=cost_type)
     JuMP.optimize!(model)
     return model
 end
@@ -219,7 +235,54 @@ function collect_binding_inequality_constraints(model::JuMP.AbstractModel)
 end
 
 
-function assemble_A(model::JuMP.AbstractModel)
+function assemble_A_poly(model::JuMP.AbstractModel)
+    Nb = length(model[:va])
+    Ng = length(model[:pg])
+    n = Nb + Ng #voltage angle and pg variables
+    A = zeros(n,n)
+
+    all_binding_constraints = collect_binding_constraints(model, Nb) #Nb passed in in order to identify the nodal power balance constraints
+
+    #println("There are $(length(all_binding_constraints)) total binding constraints")
+
+    i = 1
+    for con in all_binding_constraints
+        #initialize row
+        temp_row = zeros(n)
+
+        #grab the voltage angle and pg vars in order
+        sorted_va_idx = sort(axes(model[:va])[1])
+        sorted_pg_idx = sort(axes(model[:pg])[1])
+
+        va_vars = Array(model[:va][sorted_va_idx])
+        pg_vars = Array(model[:pg][sorted_pg_idx])
+
+        #and combine them into one list
+        va_pg_vars = [va_vars;pg_vars]
+
+        if typeof(con)==JuMP.VariableRef #if constraint is just variable ref, then row in A should just have a 1 where that variable is
+            var_idx = findfirst(==(con),va_pg_vars)
+            temp_row[var_idx]=1
+        else #otherwise if constraint is proper funtion (equality constraint or non-variable-definition inequality)
+            #now grab the constraint function that we're encoding
+            con_func_terms = con.terms
+            #and loop through the variables in va_pg_vars, checking whether they're in the con_func (and if so, grabbing their coefficient)
+            for (j,var) in enumerate(va_pg_vars)
+                if var in keys(con_func_terms)
+                    temp_row[j] = con_func_terms[var]
+                end
+            end
+        end
+
+        #make temp row permanent
+        A[i,:] = temp_row
+        i = i+1
+    end
+    return A
+end
+
+
+function assemble_A_pwl(model::JuMP.AbstractModel)
     Nb = length(model[:va])
     Ng = length(model[:pg])
     n = Nb + Ng + Ng #2x Ng because one cg variable for each gen as well as one pg variable

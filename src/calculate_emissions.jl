@@ -10,12 +10,18 @@ end
 function calculate_ACE(data::Dict{String,<:Any}, optimizer)
     # data checks
     @assert _contains_generator_emissions(data)
+    @assert _all_gen_costs_single_type(data)
 
-    #PowerModels.standardize_cost_terms!(data, order=2)
     PowerModels.calc_thermal_limits!(data)
 
+    cost_type = collect(values(data["gen"]))[1]["model"]
+    cost_type = ["PWL","POLY"][cost_type]
+
+    #build ref, solve dcopf
     ref = PowerModels.build_ref(data)[:it][:pm][:nw][0]
-    model = _solve_dcopf(ref, optimizer)
+    model = _solve_dcopf(ref, optimizer,cost_type=cost_type)
+    update_ref!(ref,model)
+
 
     total_system_emissions = sum(JuMP.value(model[:pg][id])*gen["emissions"] for (id,gen) in ref[:gen]) #get sum of all system emissions
     avg_system_emissions = total_system_emissions/sum(JuMP.value(model[:pg][id]) for (id,gen) in ref[:gen]) #get average system emissions
@@ -94,12 +100,16 @@ end
 function calculate_LACE(data::Dict{String,<:Any}, optimizer)
     @assert _contains_generator_emissions(data)
     @assert _no_duplicate_costs_at_bus(data)
+    @assert _all_gen_costs_single_type(data)
 
-    #PowerModels.standardize_cost_terms!(data, order=2)
     PowerModels.calc_thermal_limits!(data)
+    #get generator cost type
+    cost_type = collect(values(data["gen"]))[1]["model"]
+    cost_type = ["PWL","POLY"][cost_type]
 
+    #build ref, solve dcopf
     ref = PowerModels.build_ref(data)[:it][:pm][:nw][0]
-    model = _solve_dcopf(ref, optimizer)
+    model = _solve_dcopf(ref, optimizer,cost_type=cost_type)
     update_ref!(ref,model)
 
 
@@ -221,39 +231,73 @@ function calculate_LMCE(file::String, optimizer)
     calculate_LMCE(data, optimizer)
 end
 
-
-# function calc_LMCE(data;return_delta_pg=false,adjusted_LMCE = false,account=false)
 function calculate_LMCE(data::Dict{String,<:Any}, optimizer)
     # data checks
     @assert _contains_generator_emissions(data)
     @assert _no_duplicate_costs_at_bus(data)
+    @assert _all_gen_costs_single_type(data)
 
-    #PowerModels.standardize_cost_terms!(data, order=2)
-    PowerModels.calc_thermal_limits!(data)
+    #grab first gen cost type, asserted to be same as all others
+    gencost_type = collect(values(data["gen"]))[1]["model"]
 
-    ref = PowerModels.build_ref(data)[:it][:pm][:nw][0]
-    model = _solve_dcopf(ref, optimizer)
+    if gencost_type == 1 #PWL cost
+        PowerModels.calc_thermal_limits!(data)
 
-    ## Calculate ΔPg ##
-    #initialize A matrix to be NxN where n = N_b + N_g (number of buses plus number of generators)
-    A = assemble_A(model)
-    A_inv = inv(A)
+        ref = PowerModels.build_ref(data)[:it][:pm][:nw][0]
+        model = _solve_dcopf(ref, optimizer,cost_type="PWL")
 
-    #grab relevant portion of A_inv matrix (Last num_gens rows, first num_bus columns of A_inv)
-    Nb = length(model[:va])
-    Ng = length(model[:pg])
-    B = A_inv[Nb+1:Ng+Nb,1:Nb]
+        ## Calculate ΔPg ##
+        #initialize A matrix to be NxN where n = N_b + N_g (number of buses plus number of generators)
+        A = assemble_A_pwl(model)
+        A_inv = inv(A)
 
-    ## Calculate lmce by multiplying B (generator response) by generator emissions intensity (emissions/MWh)
-    sorted_gen_emission_factors = [ref[:gen][id]["emissions"] for id in sort(collect(keys(ref[:gen])))]
-    for r in eachcol(B)
-        r .=  r .* sorted_gen_emission_factors
+        #grab relevant portion of A_inv matrix (Last num_gens rows, first num_bus columns of A_inv)
+        Nb = length(model[:va])
+        Ng = length(model[:pg])
+        B = A_inv[Nb+1:Ng+Nb,1:Nb]
+
+        ## Calculate lmce by multiplying B (generator response) by generator emissions intensity (emissions/MWh)
+        sorted_gen_emission_factors = [ref[:gen][id]["emissions"] for id in sort(collect(keys(ref[:gen])))]
+        for r in eachcol(B)
+            r .=  r .* sorted_gen_emission_factors
+        end
+
+        bus_ids = sort(collect(keys(ref[:bus])))
+        bus_lmce = vec(sum(B,dims=1))
+        return LMCE(bus_ids, bus_lmce)
+
+    elseif gencost_type==2 #polynomial cost
+        PowerModels.calc_thermal_limits!(data)
+        ref = PowerModels.build_ref(data)[:it][:pm][:nw][0]
+        model = _solve_dcopf(ref, optimizer,cost_type="POLY")
+
+        ## Calculate ΔPg ##
+        #initialize A matrix to be NxN where n = N_b + N_g (number of buses plus number of generators)
+        A = assemble_A_poly(model)
+        A_inv = inv(A)
+
+        #grab relevant portion of A_inv matrix (Last num_gens rows, first num_bus columns of A_inv)
+        Nb = length(model[:va])
+        Ng = length(model[:pg])
+        B = A_inv[end-Ng+1:end,1:Nb]
+
+        ## Calculate lmce by multiplying B (generator response) by generator emissions intensity (emissions/MWh)
+        sorted_gen_emission_factors = [ref[:gen][id]["emissions"] for id in sort(collect(keys(ref[:gen])))]
+        for r in eachcol(B)
+            r .=  r .* sorted_gen_emission_factors
+        end
+
+        bus_ids = sort(collect(keys(ref[:bus])))
+        bus_lmce = vec(sum(B,dims=1))
+        return LMCE(bus_ids, bus_lmce)
+    else
+        error("Unsupported generator cost type $(gencost_type) detected")
+        return
     end
 
-    bus_ids = sort(collect(keys(ref[:bus])))
-    bus_lmce = vec(sum(B,dims=1))
-    return LMCE(bus_ids, bus_lmce)
+
 end
+
 
 function calculate_ALMCE(file::String, optimizer)
     data = PowerModels.parse_file(file)
@@ -261,65 +305,132 @@ function calculate_ALMCE(file::String, optimizer)
 end
 
 
-# function calc_LMCE(data;return_delta_pg=false,adjusted_LMCE = false,account=false)
+
 function calculate_ALMCE(data::Dict{String,<:Any}, optimizer)
     # data checks
     @assert _contains_generator_emissions(data)
     @assert _no_duplicate_costs_at_bus(data)
+    @assert _all_gen_costs_single_type(data)
 
-    #PowerModels.standardize_cost_terms!(data, order=2)
-    PowerModels.calc_thermal_limits!(data)
+    #grab first gen cost type, asserted to be same as all others
+    gencost_type = collect(values(data["gen"]))[1]["model"]
 
-    ref = PowerModels.build_ref(data)[:it][:pm][:nw][0]
-    model = _solve_dcopf(ref, optimizer)
+    if gencost_type==1 #PWL
+        PowerModels.calc_thermal_limits!(data)
 
-    ## Calculate ΔPg ##
-    #initialize A matrix to be NxN where n = N_b + N_g (number of buses plus number of generators)
-    A = assemble_A(model)
-    A_inv = inv(A)
+        ref = PowerModels.build_ref(data)[:it][:pm][:nw][0]
+        model = _solve_dcopf(ref, optimizer)
 
-    #grab relevant portion of A_inv matrix (Last num_gens rows, first num_bus columns of A_inv)
-    Nb = length(model[:va])
-    Ng = length(model[:pg])
-    B = B = A_inv[Nb+1:Ng+Nb,1:Nb]
+        ## Calculate ΔPg ##
+        #initialize A matrix to be NxN where n = N_b + N_g (number of buses plus number of generators)
+        A = assemble_A_pwl(model)
+        A_inv = inv(A)
 
-    ## Calculate emissions/MWh
-    sorted_gen_emission_factors = [ref[:gen][id]["emissions"] for id in sort(collect(keys(ref[:gen])))]
-    for r in eachcol(B)
-        r .=  r .* sorted_gen_emission_factors
-    end
+        #grab relevant portion of A_inv matrix (Last num_gens rows, first num_bus columns of A_inv)
+        Nb = length(model[:va])
+        Ng = length(model[:pg])
+        B = A_inv[Nb+1:Ng+Nb,1:Nb]
 
-    bus_ids = sort(collect(keys(ref[:bus])))
-    bus_lmce = vec(sum(B,dims=1))
-    lmce = LMCE(bus_ids, bus_lmce)
-
-    # adusted LMCE
-    sorted_bus_list = sort(collect(keys(ref[:bus_loads]))) #grab list of buses
-    sorted_bus_loads = zeros(length(sorted_bus_list)) #initialize zeros for total load at each bus
-
-    #loop through buses and their constituent loads to get total system load
-    for (bus_idx,bus) in enumerate(sorted_bus_list)
-        bus_loads = ref[:bus_loads][bus] #grab list of loads at bus
-        for load in bus_loads
-            sorted_bus_loads[bus_idx] += ref[:load][load]["pd"] #add real power demand for load to corresponding bus
+        ## Calculate emissions/MWh
+        sorted_gen_emission_factors = [ref[:gen][id]["emissions"] for id in sort(collect(keys(ref[:gen])))]
+        for r in eachcol(B)
+            r .=  r .* sorted_gen_emission_factors
         end
+
+        bus_ids = sort(collect(keys(ref[:bus])))
+        bus_lmce = vec(sum(B,dims=1))
+        lmce = LMCE(bus_ids, bus_lmce)
+
+        # adusted LMCE
+        sorted_bus_list = sort(collect(keys(ref[:bus_loads]))) #grab list of buses
+        sorted_bus_loads = zeros(length(sorted_bus_list)) #initialize zeros for total load at each bus
+
+        #loop through buses and their constituent loads to get total system load
+        for (bus_idx,bus) in enumerate(sorted_bus_list)
+            bus_loads = ref[:bus_loads][bus] #grab list of loads at bus
+            for load in bus_loads
+                sorted_bus_loads[bus_idx] += ref[:load][load]["pd"] #add real power demand for load to corresponding bus
+            end
+        end
+
+        #grab lmce-assigned emissions and total system load:
+        lmce_bus_emissions = sorted_bus_loads.*lmce.emissions_intensity
+        total_system_load = sum(sorted_bus_loads)
+
+        #now need to get current generator set points and calculate total system emissions
+        sorted_pg_idx = sort(axes(model[:pg])[1])
+        sorted_pg_vars = Array(model[:pg][sorted_pg_idx])
+        gen_set_points = JuMP.value.(sorted_pg_vars)
+        total_system_emissions = sum(gen_set_points.*sorted_gen_emission_factors) #get sum of all system emissions
+
+        #calculate emissions discrepancy with LMCE-assigned emissions
+        emissions_discrep = total_system_emissions - sum(lmce_bus_emissions)
+
+        LMCE_adjustment_factor = emissions_discrep/total_system_load
+
+        adjusted_LMCE = lmce.emissions_intensity .+LMCE_adjustment_factor
+        return ALMCE(sorted_bus_list, adjusted_LMCE)
+
+    elseif gencost_type==2 #Polynomial cost
+        PowerModels.calc_thermal_limits!(data)
+        ref = PowerModels.build_ref(data)[:it][:pm][:nw][0]
+        model = _solve_dcopf(ref, optimizer,cost_type="POLY")
+
+        ## Calculate ΔPg ##
+        #initialize A matrix to be NxN where n = N_b + N_g (number of buses plus number of generators)
+        A = assemble_A_poly(model)
+        A_inv = inv(A)
+
+        #grab relevant portion of A_inv matrix (Last num_gens rows, first num_bus columns of A_inv)
+        Nb = length(model[:va])
+        Ng = length(model[:pg])
+        B = A_inv[end-Ng+1:end,1:Nb]
+
+        ## Calculate lmce by multiplying B (generator response) by generator emissions intensity (emissions/MWh)
+        sorted_gen_emission_factors = [ref[:gen][id]["emissions"] for id in sort(collect(keys(ref[:gen])))]
+        for r in eachcol(B)
+            r .=  r .* sorted_gen_emission_factors
+        end
+
+        bus_ids = sort(collect(keys(ref[:bus])))
+        bus_lmce = vec(sum(B,dims=1))
+        lmce = LMCE(bus_ids, bus_lmce)
+
+        # adusted LMCE
+        sorted_bus_list = sort(collect(keys(ref[:bus_loads]))) #grab list of buses
+        sorted_bus_loads = zeros(length(sorted_bus_list)) #initialize zeros for total load at each bus
+
+        #loop through buses and their constituent loads to get total system load
+        for (bus_idx,bus) in enumerate(sorted_bus_list)
+            bus_loads = ref[:bus_loads][bus] #grab list of loads at bus
+            for load in bus_loads
+                sorted_bus_loads[bus_idx] += ref[:load][load]["pd"] #add real power demand for load to corresponding bus
+            end
+        end
+
+        #grab lmce-assigned emissions and total system load:
+        lmce_bus_emissions = sorted_bus_loads.*lmce.emissions_intensity
+        total_system_load = sum(sorted_bus_loads)
+
+        #now need to get current generator set points and calculate total system emissions
+        sorted_pg_idx = sort(axes(model[:pg])[1])
+        sorted_pg_vars = Array(model[:pg][sorted_pg_idx])
+        gen_set_points = JuMP.value.(sorted_pg_vars)
+        total_system_emissions = sum(gen_set_points.*sorted_gen_emission_factors) #get sum of all system emissions
+
+        #calculate emissions discrepancy with LMCE-assigned emissions
+        emissions_discrep = total_system_emissions - sum(lmce_bus_emissions)
+
+        LMCE_adjustment_factor = emissions_discrep/total_system_load
+
+        adjusted_LMCE = lmce.emissions_intensity .+LMCE_adjustment_factor
+        return ALMCE(sorted_bus_list, adjusted_LMCE)
+
+
+    else
+        error("Unsupported generator cost type $(gencost_type) detected")
+        return
+
     end
 
-    #grab lmce-assigned emissions and total system load:
-    lmce_bus_emissions = sorted_bus_loads.*lmce.emissions_intensity
-    total_system_load = sum(sorted_bus_loads)
-
-    #now need to get current generator set points and calculate total system emissions
-    sorted_pg_idx = sort(axes(model[:pg])[1])
-    sorted_pg_vars = Array(model[:pg][sorted_pg_idx])
-    gen_set_points = JuMP.value.(sorted_pg_vars)
-    total_system_emissions = sum(gen_set_points.*sorted_gen_emission_factors) #get sum of all system emissions
-
-    #calculate emissions discrepancy with LMCE-assigned emissions
-    emissions_discrep = total_system_emissions - sum(lmce_bus_emissions)
-
-    LMCE_adjustment_factor = emissions_discrep/total_system_load
-
-    adjusted_LMCE = lmce.emissions_intensity .+LMCE_adjustment_factor
-    return ALMCE(sorted_bus_list, adjusted_LMCE)
 end
