@@ -6,7 +6,7 @@ ElectricityEmissions.jl is a Julia package for the calculation of carbon emissio
 
 ## Installation
 The latest development version of `ElectricityEmissions.jl` can be added via:
-```Pkg> add XXXXX```
+```Pkg> add XXXX.git```
 
 
 ## Basic Use
@@ -35,7 +35,7 @@ plot_emissions(case)
 - `calculate_LMCE`: Locational Marginal Carbon Emissions
 - `calculate_ACE`: Average Carbon Emissions
 - `calculate_LACE`: Locational Average Carbon Emissions (as proposed in [Chen et. al.](https://arxiv.org/abs/2311.03712))
-- `calculate ALMCE:` Adjusted Locational Marginal Carbon Emissions (as we propose in [XXXX](XX)
+- `calculate ALMCE:` Adjusted Locational Marginal Carbon Emissions (as we propose in XXXX)
 
 
 ## Generator Cost Function Support
@@ -45,14 +45,14 @@ Currently, `ElectricityEmissions.jl` supports the use of test cases with linear 
 The calculation of marginal metrics, such as LMCE and ALMCE, relies on the inversion of a constraint matrix and hence requires a unique solution to the generation dispatch problem (OPF). Situations in which there is more than one generator with the same cost function at a particular bus may result in a `SingularException`. To remedy this, we have included the function `add_gen_cost_noise!(case)`which adds a small amount of noise to all generator cost functions.
 
 ## Acknowledgements
-This code is primarily developed by Joe Gorka \<jgorka@wisc.edu\>, Noah Rhodes \<nrhodes@lanl.gov\>, and Line Roald \<roald@wisc.edu\>.
+This code is primarily developed by XXXX.
 
 
 ## Citation Information
 If you use ElectricityEmissions.jl in your project, we would appreciate if you would cite the following publication:
 
 ```
-Removed for double-blind review.
+XXXX
 }
 ```
 
