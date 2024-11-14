@@ -37,7 +37,7 @@ plot_emissions(case)
 - `calculate_LMCE`: Locational Marginal Carbon Emissions
 - `calculate_ACE`: Average Carbon Emissions
 - `calculate_LACE`: Locational Average Carbon Emissions (as proposed in [Chen et. al.](https://arxiv.org/abs/2311.03712))
-- `calculate ALMCE:` Adjusted Locational Marginal Carbon Emissions (as we propose in [ElectricityEmissions.jl: A Framework for the Comparison of Carbon Intensity Signals](TODO))
+- `calculate ALMCE:` Adjusted Locational Marginal Carbon Emissions (as we propose in [ElectricityEmissions.jl: A Framework for the Comparison of Carbon Intensity Signals](https://arxiv.org/abs/2411.06560)
 
 
 ## Generator Cost Function Support
@@ -54,7 +54,15 @@ This code is primarily developed by Joe Gorka \<jgorka@wisc.edu\>, Noah Rhodes \
 If you use ElectricityEmissions.jl in your project, we would appreciate if you would cite the following publication:
 
 ```
-TODO
+@misc{gorka2024electricityemissionsjl,
+      title={ElectricityEmissions.jl: A Framework for the Comparison of Carbon Intensity Signals}, 
+      author={Joe Gorka and Noah Rhodes and Line Roald},
+      year={2024},
+      eprint={2411.06560},
+      archivePrefix={arXiv},
+      primaryClass={eess.SY},
+      url={https://arxiv.org/abs/2411.06560}, 
+}
 ```
 
 
