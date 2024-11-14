@@ -53,7 +53,6 @@ If you use ElectricityEmissions.jl in your project, we would appreciate if you w
 
 ```
 XXXX
-}
 ```
 
 
