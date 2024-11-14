@@ -39,7 +39,7 @@ plot_emissions(case)
 
 
 ## Generator Cost Function Support
-Currently, `ElectricityEmissions.jl` supports the use of test cases with linear or piece-wise linear generator cost functions. At present, quadratic and higher terms within polynomial cost functions will be ignored. However, An upcoming update will a add support for quadratic terms.
+Currently, `ElectricityEmissions.jl` supports the use of test cases with linear or piece-wise linear generator cost functions. At present, quadratic and higher terms within polynomial cost functions will be ignored. However, an upcoming update will a add support for quadratic terms.
 
 ## Troubleshooting
 The calculation of marginal metrics, such as LMCE and ALMCE, relies on the inversion of a constraint matrix and hence requires a unique solution to the generation dispatch problem (OPF). Situations in which there is more than one generator with the same cost function at a particular bus may result in a `SingularException`. To remedy this, we have included the function `add_gen_cost_noise!(case)`which adds a small amount of noise to all generator cost functions.
